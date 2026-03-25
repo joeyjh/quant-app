@@ -26,9 +26,9 @@ selected_sector = st.sidebar.selectbox(
 
 # 종목 리스트 가져오기
 try:
-    stocks = fdr.StockListing('KOSPI').head(30)
+    stocks = fdr.StockListing('KOSDAQ').head(30)
 except:
-    st.error("주식 데이터를 불러오지 못했습니다. 잠시 후 다시 시도해주세요.")
+    st.warning("데이터 서버 상태가 불안정합니다. 다시 시도해주세요.")
     st.stop()
 # 임시 산업 데이터 (테스트용)
 stocks["sector"] = ["반도체", "자동차", "금융", "반도체", "자동차"] * 10
