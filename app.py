@@ -36,23 +36,28 @@ if selected_sector != "전체":
 results = []
 
 for code, name in zip(stocks['Code'], stocks['Name']):
+
+    # 1. 데이터 가져오기
     try:
         price = fdr.DataReader(code)
-
-        # 6개월 수익률
-        ret = price['Close'].pct_change(120).iloc[-1]
-
-        # 변동성
-        vol = price['Close'].pct_change().std()
-
-        results.append({
-            "종목": name,
-            "return": ret,
-            "volatility": vol
-        })
-
+        if price.empty:
+            continue
     except:
         continue
+
+    # 2. 계산
+    try:
+        ret = price['Close'].pct_change(120).iloc[-1]
+        vol = price['Close'].pct_change().std()
+    except:
+        continue
+
+    # 3. 결과 저장
+    results.append({
+        "종목": name,
+        "return": ret,
+        "volatility": vol
+    })
 
 df = pd.DataFrame(results)
 
