@@ -26,7 +26,7 @@ selected_sector = st.sidebar.selectbox(
 
 # 종목 리스트 가져오기
 try:
-    stocks = fdr.StockListing('KOSDAQ').head(30)
+    stocks = fdr.StockListing('KOSDAQ').head(50)
 except:
     st.warning("데이터 서버 상태가 불안정합니다. 다시 시도해주세요.")
     st.stop()
