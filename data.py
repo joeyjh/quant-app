@@ -19,7 +19,7 @@ def get_sp500():
 def load_all_data(tickers):
     return yf.download(
         tickers,
-        period="6mo",
+        period="2y",
         group_by='ticker',
         threads=True,
         progress=False
@@ -64,4 +64,4 @@ def get_fundamentals(tickers):
 
 @st.cache_data
 def get_chart(ticker):
-    return yf.download(ticker, period="6mo", progress=False)
+    return yf.download(ticker, period="2y", progress=False)

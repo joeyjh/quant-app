@@ -1,9 +1,10 @@
-import yfinance as yf
+
 import pandas as pd
 import streamlit as st
 
 from data import get_sp500, load_all_data, get_fundamentals, get_chart
 from factors import calculate_factors, calculate_scores
+from factors import backtest_strategy
 
 
 st.write("버전2 - 미국주식")
@@ -102,3 +103,14 @@ chart_data = get_chart(selected_ticker)
 # 🟢 차트 출력
 st.subheader(f"📈 {selected_ticker} 가격 차트")
 st.line_chart(chart_data["Close"])
+
+st.subheader("📊 백테스트 결과")
+
+weights = (momentum_weight, risk_weight, value_weight, quality_weight)
+
+bt = backtest_strategy(data, fundamentals, tickers, weights)
+
+if bt is not None and len(bt) > 0:
+    st.line_chart(bt)
+else:
+    st.warning("백테스트 데이터 부족")
