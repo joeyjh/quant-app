@@ -104,6 +104,8 @@ chart_data = get_chart(selected_ticker)
 st.subheader(f"📈 {selected_ticker} 가격 차트")
 st.line_chart(chart_data["Close"])
 
+
+# 백테스트
 st.subheader("📊 백테스트 결과")
 
 weights = (momentum_weight, risk_weight, value_weight, quality_weight)
@@ -112,5 +114,47 @@ bt = backtest_strategy(data, fundamentals, tickers, weights)
 
 if bt is not None and len(bt) > 0:
     st.line_chart(bt)
+
+    # ===== 여기부터 추가 =====
+
+    import yfinance as yf
+
+    # 📊 S&P500
+    spy = yf.download("SPY", period="2y", progress=False)
+    spy_returns = spy["Close"].pct_change().dropna().squeeze()
+    spy_cum = spy_returns.cumsum()
+
+    # 길이 맞추기
+    min_len = min(len(bt), len(spy_cum))
+
+    compare_df = pd.DataFrame({
+        "Strategy": bt.values.flatten()[:min_len],
+        "S&P500": spy_cum.values.flatten()[:min_len]
+    })
+
+    st.subheader("📊 전략 vs S&P500")
+    st.line_chart(compare_df)
+
+    # 📈 CAGR
+    years = len(bt) / 12
+    total_return = bt.iloc[-1]
+    cagr = (1 + total_return) ** (1 / years) - 1
+    st.write(f"📈 CAGR: {cagr:.2%}")
+
+    # 📊 Sharpe Ratio
+    returns = bt.diff().dropna()
+    sharpe = returns.mean() / returns.std() * (12 ** 0.5)
+    st.write(f"📊 Sharpe Ratio: {sharpe:.2f}")
+
+    # 📉 MDD
+    cum = (1 + returns).cumprod()
+    peak = cum.cummax()
+    drawdown = (cum - peak) / peak
+    mdd = drawdown.min()
+    st.write(f"📉 Max Drawdown: {mdd:.2%}")
+
+    # ===== 여기까지 추가 =====
+
 else:
     st.warning("백테스트 데이터 부족")
+
