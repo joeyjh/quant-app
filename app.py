@@ -1,15 +1,23 @@
 import streamlit as st
 import pandas as pd
 import yfinance as yf
-
+import requests
+st.write("버전2 - 미국주식")
 st.title("📈 Quant Stock Recommender (US Market)")
 
 # 🥇 S&P500 종목 가져오기
 @st.cache_data
 def get_sp500():
     url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-    table = pd.read_html(url)[0]
-    return table["Symbol"].tolist()
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0"
+    }
+    
+    response = requests.get(url, headers=headers)
+    tables = pd.read_html(response.text)
+    
+    return tables[0]["Symbol"].tolist()
 
 tickers = get_sp500()[:100]  # 🔥 100개만 사용 (안정성)
 
@@ -44,14 +52,20 @@ for ticker in tickers:
         continue
 
     try:
-        # 📈 모멘텀
-        ret = df['Close'].pct_change(120).iloc[-1]
+        # 📊 모멘텀
+        close = df['Close']
+
+        # 🔥 핵심 수정
+        if isinstance(close, pd.DataFrame):
+            close = close.iloc[:, 0]
+
+        ret = close.pct_change(120).iloc[-1]
 
         # 📉 리스크
-        vol = df['Close'].pct_change().std()
+        vol = close.pct_change().std()
 
-        # 💰 밸류 (간단 proxy)
-        value = 1 / df['Close'].iloc[-1]
+        # 💰 밸류
+        value = 1 / close.iloc[-1]
 
         results.append({
             "Ticker": ticker,
@@ -64,6 +78,19 @@ for ticker in tickers:
         continue
 
 df = pd.DataFrame(results)
+
+# 🔥 타입 강제 변환
+df["return"] = pd.to_numeric(df["return"], errors="coerce")
+df["volatility"] = pd.to_numeric(df["volatility"], errors="coerce")
+
+# 🔥 데이터 정리
+df = df.dropna()
+df = df.reset_index(drop=True)
+
+# 🔥 빈 데이터 방지
+if len(df) == 0:
+    st.warning("데이터가 부족합니다.")
+    st.stop()
 
 # 🧠 결과 처리
 if df.empty:
