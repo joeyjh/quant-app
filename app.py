@@ -111,5 +111,22 @@ else:
 
     df = df.sort_values("score")
 
-    st.subheader("🏆 추천 종목 TOP 10")
-    st.dataframe(df.head(10)[["Ticker", "score"]])
+df["return"] = df["return"].round(4)
+df["volatility"] = df["volatility"].round(4)
+df["value"] = df["value"].round(4)
+df["score"] = df["score"].round(2)
+
+df = df.rename(columns={
+        "return": "Return (6M)",
+        "volatility": "Risk (Vol)",
+        "value": "Value Score",
+        "score": "Total Score"
+})
+    
+st.subheader("🏆 추천 종목 TOP 10")
+
+st.dataframe(
+    df.head(10)[
+        ["Ticker", "Return (6M)", "Risk (Vol)", "Value Score", "Total Score"]
+    ]
+)
