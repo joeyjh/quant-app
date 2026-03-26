@@ -91,6 +91,9 @@ def backtest_strategy(data, fundamentals, tickers, weights):
     # 매월 리밸런싱
     monthly_dates = dates[::21]  # 대략 1개월
 
+    prev_top = set()
+    turnovers = []
+
     for i in range(len(monthly_dates) - 1):
         start = monthly_dates[i]
         end = monthly_dates[i + 1]
@@ -102,7 +105,7 @@ def backtest_strategy(data, fundamentals, tickers, weights):
                 df = data[ticker]
                 df_period = df.loc[:start]
 
-                if len(df_period) < 120:
+                if len(df_period) < 60:
                     continue
 
                 # Momentum
@@ -136,7 +139,7 @@ def backtest_strategy(data, fundamentals, tickers, weights):
 
         df_temp = pd.DataFrame(results)
 
-        if len(df_temp) < 10:
+        if len(df_temp) < 5:
             continue
 
         # z-score
@@ -158,6 +161,15 @@ def backtest_strategy(data, fundamentals, tickers, weights):
 
         top = df_temp.sort_values("score", ascending=False).head(10)
 
+        current_top = set(top["Ticker"])
+
+        if prev_top:
+            changed = len(current_top - prev_top)
+            turnover = changed / len(current_top)
+            turnovers.append(turnover)
+
+        prev_top = current_top
+
         # 다음 기간 수익률
         period_returns = []
 
@@ -166,7 +178,13 @@ def backtest_strategy(data, fundamentals, tickers, weights):
             try:
                 start_price = df.loc[start]["Close"]
                 end_price = df.loc[end]["Close"]
-                r = (end_price / start_price) - 1
+                # 거래 비용
+                cost = 0.002
+
+                # 슬리피지
+                slippage = 0.001
+
+                r = ((end_price * (1 - slippage)) / (start_price * (1 + slippage))) - 1 - cost
                 period_returns.append(r)
             except:
                 continue
@@ -176,4 +194,4 @@ def backtest_strategy(data, fundamentals, tickers, weights):
 
         portfolio_returns.append(sum(period_returns) / len(period_returns))
 
-    return pd.Series(portfolio_returns).cumsum()
+    return pd.Series(portfolio_returns).cumsum(), turnovers

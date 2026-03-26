@@ -1,6 +1,7 @@
 
 import pandas as pd
 import streamlit as st
+import yfinance as yf
 
 from data import get_sp500, load_all_data, get_fundamentals, get_chart
 from factors import calculate_factors, calculate_scores
@@ -110,14 +111,20 @@ st.subheader("📊 백테스트 결과")
 
 weights = (momentum_weight, risk_weight, value_weight, quality_weight)
 
-bt = backtest_strategy(data, fundamentals, tickers, weights)
+bt, turnovers = backtest_strategy(data, fundamentals, tickers, weights)
 
 if bt is not None and len(bt) > 0:
     st.line_chart(bt)
+    
+    # 🔁 turnover 출력 (여기!)
+    if len(turnovers) > 0:
+        avg_turnover = sum(turnovers) / len(turnovers)
+        st.write(f"🔁 Average Turnover: {avg_turnover:.2%}")
+    else:
+        st.write("🔁 Turnover 데이터 부족")
+    
 
     # ===== 여기부터 추가 =====
-
-    import yfinance as yf
 
     # 📊 S&P500
     spy = yf.download("SPY", period="2y", progress=False)
