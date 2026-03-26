@@ -33,39 +33,40 @@ if total > 0:
     risk_weight /= total
     value_weight /= total
 
-# 🥇 데이터 가져오기 함수 (캐싱)
-@st.cache_data
-def load_data(ticker):
-    try:
-        df = yf.download(ticker, period="6mo", progress=False)
-        return df
-    except:
-        return None
+
+@st.cache_data(ttl=3600)
+def load_all_data(tickers):
+    return yf.download(
+        tickers,
+        period="6mo",
+        group_by='ticker',
+        threads=True,
+        progress=False
+    )
+
+data = load_all_data(tickers)
 
 results = []
 
-# 📊 데이터 수집
+
 for ticker in tickers:
-    df = load_data(ticker)
-
-    if df is None or df.empty:
-        continue
-
     try:
-        # 📊 모멘텀
-        close = df['Close']
+        df = data[ticker]
 
-        # 🔥 핵심 수정
-        if isinstance(close, pd.DataFrame):
-            close = close.iloc[:, 0]
+        if df is None or df.empty:
+            continue
 
-        ret = close.pct_change(120).iloc[-1]
+        # 모멘텀
+        ret = df['Close'].pct_change(120).iloc[-1]
 
-        # 📉 리스크
-        vol = close.pct_change().std()
+        if pd.isna(ret):
+            continue
 
-        # 💰 밸류
-        value = 1 / close.iloc[-1]
+        # 리스크
+        vol = df['Close'].pct_change().std()
+
+        # 밸류
+        value = 1 / df['Close'].iloc[-1]
 
         results.append({
             "Ticker": ticker,
