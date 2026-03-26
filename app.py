@@ -1,94 +1,87 @@
 import streamlit as st
-import FinanceDataReader as fdr
 import pandas as pd
-import numpy as np
+import yfinance as yf
 
-st.title("📊 퀀트 주식 추천 앱")
+st.title("📈 Quant Stock Recommender (US Market)")
 
-st.sidebar.header("⚙️ 설정")
+# 🥇 S&P500 종목 가져오기
+@st.cache_data
+def get_sp500():
+    url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
+    table = pd.read_html(url)[0]
+    return table["Symbol"].tolist()
 
+tickers = get_sp500()[:100]  # 🔥 100개만 사용 (안정성)
+
+# 🎯 슬라이더 (가중치)
 momentum_weight = st.sidebar.slider("Momentum", 0.0, 1.0, 0.4)
 risk_weight = st.sidebar.slider("Risk", 0.0, 1.0, 0.3)
 value_weight = st.sidebar.slider("Value", 0.0, 1.0, 0.3)
 
+# 🔄 정규화
 total = momentum_weight + risk_weight + value_weight
-
 if total > 0:
     momentum_weight /= total
     risk_weight /= total
     value_weight /= total
 
-selected_sector = st.sidebar.selectbox(
-    "산업 선택",
-    ["전체", "반도체", "자동차", "금융"]
-)
-
-
-# 종목 리스트 가져오기
-try:
-    stocks = fdr.StockListing('KOSDAQ').head(50)
-except:
-    st.warning("데이터 서버 상태가 불안정합니다. 다시 시도해주세요.")
-    st.stop()
-# 임시 산업 데이터 (테스트용)
-stocks["sector"] = ["반도체", "자동차", "금융", "반도체", "자동차"] * 10
-
-# 산업 필터 적용
-if selected_sector != "전체":
-    stocks = stocks[stocks["sector"] == selected_sector]
+# 🥇 데이터 가져오기 함수 (캐싱)
+@st.cache_data
+def load_data(ticker):
+    try:
+        df = yf.download(ticker, period="6mo")
+        return df
+    except:
+        return None
 
 results = []
 
-for code, name in zip(stocks['Code'], stocks['Name']):
+# 📊 데이터 수집
+for ticker in tickers:
+    df = load_data(ticker)
 
-    # 1. 데이터 가져오기
-    try:
-        price = fdr.DataReader(code)
-        if price.empty:
-            continue
-    except:
+    if df is None or df.empty:
         continue
 
-    # 2. 계산
     try:
-        ret = price['Close'].pct_change(120).iloc[-1]
-        vol = price['Close'].pct_change().std()
+        # 📈 모멘텀
+        ret = df['Close'].pct_change(120).iloc[-1]
+
+        # 📉 리스크
+        vol = df['Close'].pct_change().std()
+
+        # 💰 밸류 (간단 proxy)
+        value = 1 / df['Close'].iloc[-1]
+
+        results.append({
+            "Ticker": ticker,
+            "return": ret,
+            "volatility": vol,
+            "value": value
+        })
+
     except:
         continue
-
-    # 3. 결과 저장
-    results.append({
-        "종목": name,
-        "return": ret,
-        "volatility": vol
-    })
 
 df = pd.DataFrame(results)
 
-# NaN 제거
-df = df.dropna()
-# 🔥 Value 데이터 추가 (여기!)
-df["PER"] = np.random.uniform(5, 30, len(df))
-df["PBR"] = np.random.uniform(0.5, 5, len(df))
+# 🧠 결과 처리
+if df.empty:
+    st.warning("데이터를 불러오지 못했습니다.")
+else:
+    # 📊 랭킹 계산
+    df["momentum_rank"] = df["return"].rank(ascending=False)
+    df["risk_rank"] = df["volatility"].rank(ascending=True)
+    df["value_rank"] = df["value"].rank(ascending=False)
 
-# 점수 계산
-df["momentum_rank"] = df["return"].rank(ascending=False)
-df["risk_rank"] = df["volatility"].rank(ascending=True)
+    # 🎯 최종 점수
+    df["score"] = (
+        df["momentum_rank"] * momentum_weight +
+        df["risk_rank"] * risk_weight +
+        df["value_rank"] * value_weight
+    )
 
-# 🔥 Value rank 추가
-df["per_rank"] = df["PER"].rank(ascending=True)
-df["pbr_rank"] = df["PBR"].rank(ascending=True)
+    df = df.sort_values("score")
 
-df["value_score"] = (df["per_rank"] + df["pbr_rank"]) / 2
-
-df["score"] = (
-    df["momentum_rank"] * momentum_weight +
-    df["risk_rank"] * risk_weight +
-    df["value_score"] * value_weight
-)
-# 정렬
-df = df.sort_values("score")
-
-# 출력
-st.subheader("🏆 추천 종목 TOP 10")
-st.dataframe(df.head(10))
+    st.subheader("🏆 추천 종목 TOP 10")
+    st.dataframe(df.head(10)[["Ticker", "score"]])
