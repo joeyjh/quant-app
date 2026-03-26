@@ -1,3 +1,5 @@
 streamlit
 pandas
-finance-datareader
+yfinance
+lxml
+html5lib
