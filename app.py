@@ -12,7 +12,7 @@ st.write("버전2 - 미국주식")
 st.title("📈 Quant Stock Recommender (US Market)")
 
 
-tickers = get_sp500()[:100]  # 🔥 100개만 사용 (안정성)
+tickers = get_sp500() # 🔥 100개만 사용 (안정성)
 
 # 🎯 슬라이더 (가중치)
 momentum_weight = st.sidebar.slider("Momentum", 0.0, 1.0, 0.4)
@@ -30,9 +30,9 @@ if total > 0:
     quality_weight /= total
 
 
-data = load_all_data(tickers)
-
-fundamentals = get_fundamentals(tickers)
+with st.spinner("📊 데이터 로딩 중... (최초 1회 약 1~2분 소요)"):
+    data = load_all_data(tickers)
+    fundamentals = get_fundamentals(tickers)
 
 df = calculate_factors(data, fundamentals, tickers)
 

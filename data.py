@@ -42,7 +42,7 @@ def fetch_single_fundamental(t):
             "margin": margin,
             "name": name
         }
-    except:
+    except Exception:
         return t, {
             "pe": None,
             "margin": None,
@@ -54,7 +54,7 @@ def fetch_single_fundamental(t):
 def get_fundamentals(tickers):
     result = {}
 
-    with ThreadPoolExecutor(max_workers=10) as executor:
+    with ThreadPoolExecutor(max_workers=20) as executor:
         futures = executor.map(fetch_single_fundamental, tickers)
 
         for ticker, data in futures:
