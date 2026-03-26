@@ -2,6 +2,11 @@ import streamlit as st
 import pandas as pd
 import yfinance as yf
 import requests
+
+@st.cache_data
+def get_chart(ticker):
+    return yf.download(ticker, period="6mo", progress=False)
+
 st.write("버전2 - 미국주식")
 st.title("📈 Quant Stock Recommender (US Market)")
 
@@ -125,8 +130,22 @@ df = df.rename(columns={
     
 st.subheader("🏆 추천 종목 TOP 10")
 
+#데이터 프레임 출력
 st.dataframe(
     df.head(10)[
         ["Ticker", "Return (6M)", "Risk (Vol)", "Value Score", "Total Score"]
     ]
 )
+
+# 🟢 종목 선택
+selected_ticker = st.selectbox(
+    "📊 종목 선택",
+    df.head(10)["Ticker"]
+)
+
+# 🟢 차트 데이터 가져오기 (캐싱 적용)
+chart_data = get_chart(selected_ticker)
+
+# 🟢 차트 출력
+st.subheader(f"📈 {selected_ticker} 가격 차트")
+st.line_chart(chart_data["Close"])
