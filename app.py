@@ -1,59 +1,14 @@
-import streamlit as st
-import pandas as pd
 import yfinance as yf
-import requests
+import pandas as pd
+import streamlit as st
 
-@st.cache_data(ttl=86400)
-def get_company_name(ticker):
-    try:
-        info = yf.Ticker(ticker).info
-        return info.get("shortName", ticker)
-    except:
-        return ticker
+from data import get_sp500, load_all_data, get_fundamentals, get_chart
+from factors import calculate_factors, calculate_scores
 
-@st.cache_data(ttl=86400)
-def get_fundamentals(tickers):
-    result = {}
-
-    for t in tickers:
-        try:
-            info = yf.Ticker(t).info
-
-            pe = info.get("trailingPE", None)
-            margin = info.get("profitMargins", None)
-
-            result[t] = {
-                "pe": pe,
-                "margin": margin
-            }
-        except:
-            result[t] = {
-                "pe": None,
-                "margin": None
-            }
-
-    return result
-
-@st.cache_data
-def get_chart(ticker):
-    return yf.download(ticker, period="6mo", progress=False)
 
 st.write("버전2 - 미국주식")
 st.title("📈 Quant Stock Recommender (US Market)")
 
-# 🥇 S&P500 종목 가져오기
-@st.cache_data
-def get_sp500():
-    url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
-    
-    headers = {
-        "User-Agent": "Mozilla/5.0"
-    }
-    
-    response = requests.get(url, headers=headers)
-    tables = pd.read_html(response.text)
-    
-    return tables[0]["Symbol"].tolist()
 
 tickers = get_sp500()[:100]  # 🔥 100개만 사용 (안정성)
 
@@ -72,68 +27,13 @@ if total > 0:
     value_weight /= total
     quality_weight /= total
 
-@st.cache_data(ttl=3600)
-def load_all_data(tickers):
-    return yf.download(
-        tickers,
-        period="6mo",
-        group_by='ticker',
-        threads=True,
-        progress=False
-    )
 
 data = load_all_data(tickers)
 
 fundamentals = get_fundamentals(tickers)
 
-results = []
+df = calculate_factors(data, fundamentals, tickers)
 
-
-for ticker in tickers:
-    try:
-        df = data[ticker]
-
-        if df is None or df.empty:
-            continue
-
-        # 모멘텀
-        ret = df['Close'].pct_change(120).iloc[-1]
-
-        if pd.isna(ret):
-            continue
-
-        # 리스크
-        vol = df['Close'].pct_change().std()
-
-
-
-        fund = fundamentals.get(ticker, {})
-
-        pe = fund.get("pe", None)
-        margin = fund.get("margin", None)
-
-        # Value (PER 낮을수록 좋음)
-        if pe is None or pe <= 0:
-            continue
-        value = 1 / pe
-
-        # Quality (수익성)
-        if margin is None:
-            continue
-        quality = margin
-
-        results.append({
-            "Ticker": ticker,
-            "return": ret,
-            "volatility": vol,
-            "value": value,
-            "quality": quality
-        })
-
-    except:
-        continue
-
-df = pd.DataFrame(results)
 
 # 🔥 타입 강제 변환
 df["return"] = pd.to_numeric(df["return"], errors="coerce")
@@ -153,23 +53,9 @@ if df.empty:
     st.warning("데이터를 불러오지 못했습니다.")
 else:
     # 📊 랭킹 계산
-    # 📊 z-score 계산
-    df["momentum_z"] = (df["return"] - df["return"].mean()) / df["return"].std()
-    df["risk_z"] = (df["volatility"] - df["volatility"].mean()) / df["volatility"].std()
-    df["value_z"] = (df["value"] - df["value"].mean()) / df["value"].std()
-    df["quality_z"] = (df["quality"] - df["quality"].mean()) / df["quality"].std()
+    weights = (momentum_weight, risk_weight, value_weight, quality_weight)
+    df = calculate_scores(df, weights)
 
-    df["risk_z"] = -df["risk_z"]
-
-    # 🎯 최종 점수
-    df["score"] = (
-        df["momentum_z"] * momentum_weight +
-        df["risk_z"] * risk_weight +
-        df["value_z"] * value_weight +
-        df["quality_z"] * quality_weight
-    )  
-
-    df = df.sort_values("score", ascending=False)
 
 df["return"] = df["return"].round(4)
 df["volatility"] = df["volatility"].round(4)
@@ -189,7 +75,9 @@ st.subheader("🏆 추천 종목 TOP 10")
 
 top10 = df.head(10).copy()
 
-top10["Company"] = top10["Ticker"].apply(get_company_name)
+top10["Company"] = top10["Ticker"].apply(
+    lambda x: fundamentals.get(x, {}).get("name", x)
+)
 
 top10["Display"] = top10["Company"] + " (" + top10["Ticker"] + ")"
 
