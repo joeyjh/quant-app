@@ -3,6 +3,14 @@ import pandas as pd
 import yfinance as yf
 import requests
 
+@st.cache_data(ttl=86400)
+def get_company_name(ticker):
+    try:
+        info = yf.Ticker(ticker).info
+        return info.get("shortName", ticker)
+    except:
+        return ticker
+
 @st.cache_data
 def get_chart(ticker):
     return yf.download(ticker, period="6mo", progress=False)
@@ -130,19 +138,27 @@ df = df.rename(columns={
     
 st.subheader("🏆 추천 종목 TOP 10")
 
+top10 = df.head(10).copy()
+
+top10["Company"] = top10["Ticker"].apply(get_company_name)
+
+top10["Display"] = top10["Company"] + " (" + top10["Ticker"] + ")"
+
 #데이터 프레임 출력
 st.dataframe(
-    df.head(10)[
-        ["Ticker", "Return (6M)", "Risk (Vol)", "Value Score", "Total Score"]
-    ]
+    top10[
+        ["Display", "Return (6M)", "Risk (Vol)", "Value Score", "Total Score"]
+    ].rename(columns={"Display": "Company"})
 )
-
 # 🟢 종목 선택
-selected_ticker = st.selectbox(
+selected_display = st.selectbox(
     "📊 종목 선택",
-    df.head(10)["Ticker"]
+    top10["Display"]
 )
 
+selected_ticker = top10[
+    top10["Display"] == selected_display
+]["Ticker"].values[0]
 # 🟢 차트 데이터 가져오기 (캐싱 적용)
 chart_data = get_chart(selected_ticker)
 
