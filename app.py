@@ -37,7 +37,7 @@ if total > 0:
 @st.cache_data
 def load_data(ticker):
     try:
-        df = yf.download(ticker, period="6mo")
+        df = yf.download(ticker, period="6mo", progress=False)
         return df
     except:
         return None
