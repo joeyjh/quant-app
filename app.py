@@ -11,6 +11,29 @@ def get_company_name(ticker):
     except:
         return ticker
 
+@st.cache_data(ttl=86400)
+def get_fundamentals(tickers):
+    result = {}
+
+    for t in tickers:
+        try:
+            info = yf.Ticker(t).info
+
+            pe = info.get("trailingPE", None)
+            margin = info.get("profitMargins", None)
+
+            result[t] = {
+                "pe": pe,
+                "margin": margin
+            }
+        except:
+            result[t] = {
+                "pe": None,
+                "margin": None
+            }
+
+    return result
+
 @st.cache_data
 def get_chart(ticker):
     return yf.download(ticker, period="6mo", progress=False)
@@ -38,14 +61,16 @@ tickers = get_sp500()[:100]  # 🔥 100개만 사용 (안정성)
 momentum_weight = st.sidebar.slider("Momentum", 0.0, 1.0, 0.4)
 risk_weight = st.sidebar.slider("Risk", 0.0, 1.0, 0.3)
 value_weight = st.sidebar.slider("Value", 0.0, 1.0, 0.3)
+quality_weight = st.sidebar.slider("Quality", 0.0, 1.0, 0.2)
 
 # 🔄 정규화
-total = momentum_weight + risk_weight + value_weight
+total = momentum_weight + risk_weight + value_weight + quality_weight
+
 if total > 0:
     momentum_weight /= total
     risk_weight /= total
     value_weight /= total
-
+    quality_weight /= total
 
 @st.cache_data(ttl=3600)
 def load_all_data(tickers):
@@ -58,6 +83,8 @@ def load_all_data(tickers):
     )
 
 data = load_all_data(tickers)
+
+fundamentals = get_fundamentals(tickers)
 
 results = []
 
@@ -78,14 +105,29 @@ for ticker in tickers:
         # 리스크
         vol = df['Close'].pct_change().std()
 
-        # 밸류
-        value = 1 / df['Close'].iloc[-1]
+
+
+        fund = fundamentals.get(ticker, {})
+
+        pe = fund.get("pe", None)
+        margin = fund.get("margin", None)
+
+        # Value (PER 낮을수록 좋음)
+        if pe is None or pe <= 0:
+            continue
+        value = 1 / pe
+
+        # Quality (수익성)
+        if margin is None:
+            continue
+        quality = margin
 
         results.append({
             "Ticker": ticker,
             "return": ret,
             "volatility": vol,
-            "value": value
+            "value": value,
+            "quality": quality
         })
 
     except:
@@ -114,12 +156,14 @@ else:
     df["momentum_rank"] = df["return"].rank(ascending=False)
     df["risk_rank"] = df["volatility"].rank(ascending=True)
     df["value_rank"] = df["value"].rank(ascending=False)
+    df["quality_rank"] = df["quality"].rank(ascending=False)
 
     # 🎯 최종 점수
     df["score"] = (
         df["momentum_rank"] * momentum_weight +
         df["risk_rank"] * risk_weight +
-        df["value_rank"] * value_weight
+        df["value_rank"] * value_weight +
+        df["quality_rank"] * quality_weight
     )
 
     df = df.sort_values("score")
@@ -127,12 +171,14 @@ else:
 df["return"] = df["return"].round(4)
 df["volatility"] = df["volatility"].round(4)
 df["value"] = df["value"].round(4)
+df["quality"] = df["quality"].round(4)
 df["score"] = df["score"].round(2)
 
 df = df.rename(columns={
         "return": "Return (6M)",
         "volatility": "Risk (Vol)",
         "value": "Value Score",
+        "quality": "Quality Score",
         "score": "Total Score"
 })
     
@@ -147,7 +193,7 @@ top10["Display"] = top10["Company"] + " (" + top10["Ticker"] + ")"
 #데이터 프레임 출력
 st.dataframe(
     top10[
-        ["Display", "Return (6M)", "Risk (Vol)", "Value Score", "Total Score"]
+        ["Display", "Return (6M)", "Risk (Vol)", "Value Score", "Quality Score", "Total Score"]
     ].rename(columns={"Display": "Company"})
 )
 # 🟢 종목 선택
