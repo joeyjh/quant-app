@@ -153,20 +153,23 @@ if df.empty:
     st.warning("데이터를 불러오지 못했습니다.")
 else:
     # 📊 랭킹 계산
-    df["momentum_rank"] = df["return"].rank(ascending=False)
-    df["risk_rank"] = df["volatility"].rank(ascending=True)
-    df["value_rank"] = df["value"].rank(ascending=False)
-    df["quality_rank"] = df["quality"].rank(ascending=False)
+    # 📊 z-score 계산
+    df["momentum_z"] = (df["return"] - df["return"].mean()) / df["return"].std()
+    df["risk_z"] = (df["volatility"] - df["volatility"].mean()) / df["volatility"].std()
+    df["value_z"] = (df["value"] - df["value"].mean()) / df["value"].std()
+    df["quality_z"] = (df["quality"] - df["quality"].mean()) / df["quality"].std()
+
+    df["risk_z"] = -df["risk_z"]
 
     # 🎯 최종 점수
     df["score"] = (
-        df["momentum_rank"] * momentum_weight +
-        df["risk_rank"] * risk_weight +
-        df["value_rank"] * value_weight +
-        df["quality_rank"] * quality_weight
-    )
+        df["momentum_z"] * momentum_weight +
+        df["risk_z"] * risk_weight +
+        df["value_z"] * value_weight +
+        df["quality_z"] * quality_weight
+    )  
 
-    df = df.sort_values("score")
+    df = df.sort_values("score", ascending=False)
 
 df["return"] = df["return"].round(4)
 df["volatility"] = df["volatility"].round(4)
