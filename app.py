@@ -4,7 +4,12 @@ import yfinance as yf
 
 from config import TOP_N
 from data import get_sp500, load_all_data, get_fundamentals, get_chart
-from factors import calculate_factors, calculate_scores, backtest_strategy
+from factors import (
+    calculate_factors,
+    calculate_scores,
+    backtest_strategy,
+    select_portfolio_with_buffer,
+)
 from metrics import calculate_cagr, calculate_sharpe, calculate_mdd
 
 
@@ -50,7 +55,50 @@ def apply_preset_if_changed():
         st.session_state["last_preset"] = current_preset
 
 
-st.write("버전5 - 미국주식")
+def parse_holdings(text):
+    if not text:
+        return []
+
+    items = [x.strip().upper() for x in text.replace("\n", ",").split(",")]
+    items = [x for x in items if x]
+
+    # 중복 제거 + 순서 유지
+    seen = set()
+    result = []
+    for item in items:
+        if item not in seen:
+            seen.add(item)
+            result.append(item)
+
+    return result
+
+
+def enrich_portfolio_table(df_portfolio, fundamentals):
+    table = df_portfolio.copy()
+
+    table["Company"] = table["Ticker"].apply(
+    lambda x: fundamentals.get(x, {}).get("name", x)
+    )
+    table["Company"] = table["Company"] + " (" + table["Ticker"] + ")"
+
+    table["momentum"] = table["momentum"].round(4)
+    table["volatility"] = table["volatility"].round(4)
+    table["value"] = table["value"].round(4)
+    table["quality"] = table["quality"].round(4)
+    table["score"] = table["score"].round(3)
+
+    table = table.rename(columns={
+        "momentum": "Momentum (12-1M)",
+        "volatility": "Risk (Vol)",
+        "value": "Value Score",
+        "quality": "Quality Score",
+        "score": "Total Score"
+    })
+
+    return table
+
+
+st.write("버전6 - 미국주식")
 st.title("📈 Quant Stock Recommender (US Market)")
 
 tickers = get_sp500()
@@ -154,21 +202,7 @@ if len(df) == 0:
     st.warning("데이터가 부족합니다.")
     st.stop()
 
-df = calculate_scores(df, weights)
-
-df["momentum"] = df["momentum"].round(4)
-df["volatility"] = df["volatility"].round(4)
-df["value"] = df["value"].round(4)
-df["quality"] = df["quality"].round(4)
-df["score"] = df["score"].round(3)
-
-df = df.rename(columns={
-    "momentum": "Momentum (12-1M)",
-    "volatility": "Risk (Vol)",
-    "value": "Value Score",
-    "quality": "Quality Score",
-    "score": "Total Score"
-})
+scored_df = calculate_scores(df, weights)
 
 st.markdown("### 🧭 투자 철학")
 st.markdown(
@@ -192,32 +226,106 @@ else:
     st.markdown("### 📌 현재 선택된 Preset: 직접 설정")
     st.write("슬라이더를 이용해 자신이 중요하다고 생각하는 팩터 비중을 직접 조정할 수 있습니다.")
 
-st.subheader("🏆 추천 종목 TOP 10")
-st.caption("백테스트에는 turnover 완화를 위한 buffer rule이 반영됩니다. 기존 보유 종목이 일정 순위 안에 남아 있으면 유지해 월간 운용에 더 적합하게 설계했습니다.")
+# =========================
+# 월간 리밸런싱 입력
+# =========================
+st.subheader("🗓️ 월간 리밸런싱 실행")
+st.caption("지난달 보유 종목을 입력하면 이번 달 기준으로 유지 / 신규편입 / 제외 종목을 자동으로 계산합니다. 입력이 없으면 현재 점수 상위 10종목을 기준으로 보여줍니다.")
 
-top10 = df.head(TOP_N).copy()
-
-top10["Company"] = top10["Ticker"].apply(
-    lambda x: fundamentals.get(x, {}).get("name", x)
+previous_holdings_text = st.text_area(
+    "지난달 보유 종목 티커 입력 (쉼표로 구분, 예: AAPL, MSFT, NVDA)",
+    value="",
+    height=100
 )
 
-top10["Display"] = top10["Company"] + " (" + top10["Ticker"] + ")"
+previous_holdings = parse_holdings(previous_holdings_text)
+valid_previous_holdings = [x for x in previous_holdings if x in scored_df["Ticker"].tolist()]
+
+if previous_holdings and not valid_previous_holdings:
+    st.warning("입력한 종목 중 현재 평가 가능한 종목이 없습니다. 현재 점수 상위 종목 기준으로 보여줍니다.")
+
+portfolio_df = select_portfolio_with_buffer(
+    scored_df,
+    valid_previous_holdings,
+    top_n=TOP_N,
+    buffer_n=15
+)
+
+final_holdings = portfolio_df["Ticker"].tolist()
+kept_holdings = [x for x in final_holdings if x in valid_previous_holdings]
+new_holdings = [x for x in final_holdings if x not in valid_previous_holdings]
+removed_holdings = [x for x in valid_previous_holdings if x not in final_holdings]
+
+target_weight = 1 / TOP_N if TOP_N > 0 else 0
+
+st.markdown("### ✅ 이번 달 최종 매수 후보")
+st.write(f"동일가중 기준 종목당 목표 비중: **{target_weight:.0%}**")
+
+portfolio_table = enrich_portfolio_table(portfolio_df, fundamentals)
+st.dataframe(
+    portfolio_table[
+        ["Company", "Momentum (12-1M)", "Risk (Vol)", "Value Score", "Quality Score", "Total Score"]
+    ]
+)
+
+col1, col2, col3 = st.columns(3)
+
+with col1:
+    st.markdown("#### 🔒 계속 보유")
+    if kept_holdings:
+        for ticker in kept_holdings:
+            name = fundamentals.get(ticker, {}).get("name", ticker)
+            st.write(f"- {name} ({ticker})")
+    else:
+        st.write("해당 없음")
+
+with col2:
+    st.markdown("#### 🟢 신규 편입")
+    if new_holdings:
+        for ticker in new_holdings:
+            name = fundamentals.get(ticker, {}).get("name", ticker)
+            st.write(f"- {name} ({ticker})")
+    else:
+        st.write("해당 없음")
+
+with col3:
+    st.markdown("#### 🔴 제외")
+    if removed_holdings:
+        for ticker in removed_holdings:
+            name = fundamentals.get(ticker, {}).get("name", ticker)
+            st.write(f"- {name} ({ticker})")
+    else:
+        st.write("해당 없음")
+
+st.markdown("### 🏆 현재 점수 기준 상위 10종목")
+st.caption("아래 표는 순수 점수 기준 상위 10종목입니다. 실제 월간 운용은 위의 최종 매수 후보 표를 참고하면 됩니다.")
+
+top10 = scored_df.head(TOP_N).copy()
+top10_table = enrich_portfolio_table(top10, fundamentals)
 
 st.dataframe(
-    top10[
-        ["Display", "Momentum (12-1M)", "Risk (Vol)", "Value Score", "Quality Score", "Total Score"]
-    ].rename(columns={"Display": "Company"})
+    top10_table[
+        ["Company", "Momentum (12-1M)", "Risk (Vol)", "Value Score", "Quality Score", "Total Score"]
+    ]
 )
 
-selected_display = st.selectbox(
+selected_source = st.radio(
+    "차트/상세 확인 기준",
+    ["이번 달 최종 매수 후보", "현재 점수 기준 상위 10종목"],
+    horizontal=True
+)
+
+if selected_source == "이번 달 최종 매수 후보":
+    selectable_table = portfolio_table.copy()
+else:
+    selectable_table = top10_table.copy()
+
+selected_company = st.selectbox(
     "📊 종목 선택",
-    top10["Display"]
+    selectable_table["Company"]
 )
 
-selected_ticker = top10[
-    top10["Display"] == selected_display
-]["Ticker"].values[0]
-
+selected_ticker = selected_company.split("(")[-1].replace(")", "").strip()
 chart_data = get_chart(selected_ticker)
 
 st.subheader(f"📈 {selected_ticker} 가격 차트")
@@ -227,6 +335,7 @@ else:
     st.warning("차트 데이터가 없습니다.")
 
 st.subheader("📊 백테스트 결과")
+st.caption("백테스트에는 buffer rule이 반영됩니다. 기존 보유 종목이 일정 순위 안에 남아 있으면 유지해 월간 운용에 더 적합하게 설계했습니다.")
 
 bt, turnovers = backtest_strategy(data, fundamentals, tickers, weights)
 
