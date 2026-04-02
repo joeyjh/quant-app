@@ -36,6 +36,7 @@ with st.spinner("📊 데이터 로딩 중... (최초 1회 약 1~2분 소요)"):
     fundamentals = get_fundamentals(tickers)
 
 df = calculate_factors(data, fundamentals, tickers)
+st.write("Factor candidates:", len(df))
 
 
 # 🔥 타입 강제 변환
@@ -76,6 +77,8 @@ df = df.rename(columns={
     
 st.subheader("🏆 추천 종목 TOP 10")
 
+
+st.write("Loaded price data:", len(data))
 top10 = df.head(10).copy()
 
 top10["Company"] = top10["Ticker"].apply(
