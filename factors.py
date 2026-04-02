@@ -1,36 +1,48 @@
 import pandas as pd
 
 
-def calculate_factors(data, fundamentals, tickers):
+def safe_zscore(series):
+    std = series.std()
+    if std == 0 or pd.isna(std):
+        return pd.Series([0] * len(series), index=series.index)
+    return (series - series.mean()) / std
+
+
+def build_factor_frame(data, fundamentals, tickers, end_date=None):
     results = []
 
     for ticker in tickers:
         try:
-            df = data[ticker]
+            df = data.get(ticker, None)
+            if df is None or df.empty:
+                continue
+
+            if end_date is not None:
+                df = df.loc[:end_date]
 
             if df is None or df.empty:
                 continue
 
-            # Momentum
-            ret = df['Close'].pct_change(120).iloc[-1]
+            if len(df) < 121:
+                continue
+
+            ret = df["Close"].pct_change(120).iloc[-1]
             if pd.isna(ret):
                 continue
 
-            # Risk
-            vol = df['Close'].pct_change().std()
+            vol = df["Close"].pct_change().std()
 
             fund = fundamentals.get(ticker, {})
             pe = fund.get("pe", None)
             margin = fund.get("margin", None)
 
-            # Value
-            if pe is None or pe <= 0:
+            if pe is None or pd.isna(pe) or pe <= 0:
                 continue
-            value = 1 / pe
 
-            # Quality
-            if margin is None:
+            if margin is None or pd.isna(margin):
                 continue
+
+            value = 1 / pe
             quality = margin
 
             results.append({
@@ -41,27 +53,36 @@ def calculate_factors(data, fundamentals, tickers):
                 "quality": quality
             })
 
-        except:
+        except Exception:
             continue
 
-    df = pd.DataFrame(results)
+    df_result = pd.DataFrame(results)
 
-    df["return"] = pd.to_numeric(df["return"], errors="coerce")
-    df["volatility"] = pd.to_numeric(df["volatility"], errors="coerce")
+    if df_result.empty:
+        return df_result
 
-    df = df.dropna().reset_index(drop=True)
+    df_result["return"] = pd.to_numeric(df_result["return"], errors="coerce")
+    df_result["volatility"] = pd.to_numeric(df_result["volatility"], errors="coerce")
+    df_result["value"] = pd.to_numeric(df_result["value"], errors="coerce")
+    df_result["quality"] = pd.to_numeric(df_result["quality"], errors="coerce")
 
-    return df
+    df_result = df_result.dropna().reset_index(drop=True)
+    return df_result
+
+
+def calculate_factors(data, fundamentals, tickers):
+    return build_factor_frame(data, fundamentals, tickers)
 
 
 def calculate_scores(df, weights):
     momentum_w, risk_w, value_w, quality_w = weights
 
-    # z-score
-    df["momentum_z"] = (df["return"] - df["return"].mean()) / df["return"].std()
-    df["risk_z"] = (df["volatility"] - df["volatility"].mean()) / df["volatility"].std()
-    df["value_z"] = (df["value"] - df["value"].mean()) / df["value"].std()
-    df["quality_z"] = (df["quality"] - df["quality"].mean()) / df["quality"].std()
+    df = df.copy()
+
+    df["momentum_z"] = safe_zscore(df["return"])
+    df["risk_z"] = safe_zscore(df["volatility"])
+    df["value_z"] = safe_zscore(df["value"])
+    df["quality_z"] = safe_zscore(df["quality"])
 
     df["risk_z"] = -df["risk_z"]
 
@@ -72,24 +93,23 @@ def calculate_scores(df, weights):
         df["quality_z"] * quality_w
     )
 
-    return df.sort_values("score", ascending=False)
+    return df.sort_values("score", ascending=False).reset_index(drop=True)
+
 
 def backtest_strategy(data, fundamentals, tickers, weights):
     portfolio_returns = []
 
     dates = None
-
     for ticker in tickers:
-        df = data[ticker]
+        df = data.get(ticker, None)
         if df is not None and not df.empty:
             dates = df.index
             break
 
     if dates is None:
-        return None
+        return None, []
 
-    # 매월 리밸런싱
-    monthly_dates = dates[::21]  # 대략 1개월
+    monthly_dates = dates[::21]
 
     prev_top = set()
     turnovers = []
@@ -98,100 +118,48 @@ def backtest_strategy(data, fundamentals, tickers, weights):
         start = monthly_dates[i]
         end = monthly_dates[i + 1]
 
-        results = []
+        df_temp = build_factor_frame(data, fundamentals, tickers, end_date=start)
 
-        for ticker in tickers:
-            try:
-                df = data[ticker]
-                df_period = df.loc[:start]
-
-                if len(df_period) < 60:
-                    continue
-
-                # Momentum
-                ret = df_period['Close'].pct_change(120).iloc[-1]
-                if pd.isna(ret):
-                    continue
-
-                # Risk
-                vol = df_period['Close'].pct_change().std()
-
-                fund = fundamentals.get(ticker, {})
-                pe = fund.get("pe", None)
-                margin = fund.get("margin", None)
-
-                if pe is None or pe <= 0 or margin is None:
-                    continue
-
-                value = 1 / pe
-                quality = margin
-
-                results.append({
-                    "Ticker": ticker,
-                    "return": ret,
-                    "volatility": vol,
-                    "value": value,
-                    "quality": quality
-                })
-
-            except:
-                continue
-
-        df_temp = pd.DataFrame(results)
-
-        if len(df_temp) < 5:
+        if df_temp.empty or len(df_temp) < 5:
             continue
 
-        # z-score
-        df_temp["momentum_z"] = (df_temp["return"] - df_temp["return"].mean()) / df_temp["return"].std()
-        df_temp["risk_z"] = (df_temp["volatility"] - df_temp["volatility"].mean()) / df_temp["volatility"].std()
-        df_temp["value_z"] = (df_temp["value"] - df_temp["value"].mean()) / df_temp["value"].std()
-        df_temp["quality_z"] = (df_temp["quality"] - df_temp["quality"].mean()) / df_temp["quality"].std()
-
-        df_temp["risk_z"] = -df_temp["risk_z"]
-
-        momentum_w, risk_w, value_w, quality_w = weights
-
-        df_temp["score"] = (
-            df_temp["momentum_z"] * momentum_w +
-            df_temp["risk_z"] * risk_w +
-            df_temp["value_z"] * value_w +
-            df_temp["quality_z"] * quality_w
-        )
-
-        top = df_temp.sort_values("score", ascending=False).head(10)
+        df_temp = calculate_scores(df_temp, weights)
+        top = df_temp.head(10)
 
         current_top = set(top["Ticker"])
 
         if prev_top:
             changed = len(current_top - prev_top)
-            turnover = changed / len(current_top)
+            turnover = changed / len(current_top) if len(current_top) > 0 else 0
             turnovers.append(turnover)
 
         prev_top = current_top
 
-        # 다음 기간 수익률
         period_returns = []
 
         for ticker in top["Ticker"]:
-            df = data[ticker]
+            df = data.get(ticker, None)
+            if df is None or df.empty:
+                continue
+
             try:
                 start_price = df.loc[start]["Close"]
                 end_price = df.loc[end]["Close"]
-                # 거래 비용
-                cost = 0.002
 
-                # 슬리피지
+                cost = 0.002
                 slippage = 0.001
 
                 r = ((end_price * (1 - slippage)) / (start_price * (1 + slippage))) - 1 - cost
                 period_returns.append(r)
-            except:
+            except Exception:
                 continue
 
         if len(period_returns) == 0:
             continue
 
         portfolio_returns.append(sum(period_returns) / len(period_returns))
+
+    if len(portfolio_returns) == 0:
+        return None, turnovers
 
     return pd.Series(portfolio_returns).cumsum(), turnovers
