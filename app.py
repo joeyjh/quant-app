@@ -13,6 +13,7 @@ st.title("📈 Quant Stock Recommender (US Market)")
 
 
 tickers = get_sp500() # 🔥 100개만 사용 (안정성)
+st.write("Ticker count:", len(tickers))
 
 # 🎯 슬라이더 (가중치)
 momentum_weight = st.sidebar.slider("Momentum", 0.0, 1.0, 0.4)
