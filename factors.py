@@ -1,11 +1,35 @@
 import pandas as pd
 
 
-def safe_zscore(series):
-    std = series.std()
-    if std == 0 or pd.isna(std):
-        return pd.Series([0] * len(series), index=series.index)
-    return (series - series.mean()) / std
+MOMENTUM_LOOKBACK = 252      # 약 12개월
+MOMENTUM_SKIP = 21           # 최근 1개월 제외
+VOL_LOOKBACK = 126           # 최근 6개월 변동성
+MIN_HISTORY = 252            # 최소 필요 데이터
+
+TOP_N = 10
+BUFFER_N = 15
+
+
+def safe_rank_score(series, ascending=True):
+    if len(series) == 0:
+        return pd.Series(dtype=float)
+
+    ranked = series.rank(pct=True, ascending=ascending)
+
+    if ranked.isna().all():
+        return pd.Series([0.5] * len(series), index=series.index)
+
+    return ranked.fillna(0.5)
+
+
+def winsorize_series(series, lower=0.02, upper=0.98):
+    if len(series) == 0:
+        return series
+
+    low = series.quantile(lower)
+    high = series.quantile(upper)
+
+    return series.clip(lower=low, upper=high)
 
 
 def build_factor_frame(data, fundamentals, tickers, end_date=None):
@@ -23,32 +47,50 @@ def build_factor_frame(data, fundamentals, tickers, end_date=None):
             if df is None or df.empty:
                 continue
 
-            if len(df) < 121:
+            if len(df) < MIN_HISTORY:
                 continue
 
-            ret = df["Close"].pct_change(120).iloc[-1]
-            if pd.isna(ret):
+            close = df["Close"].dropna()
+
+            if len(close) < MIN_HISTORY:
                 continue
 
-            vol = df["Close"].pct_change().std()
+            # 12-1 Momentum
+            current_price = close.iloc[-1 - MOMENTUM_SKIP]
+            past_price = close.iloc[-1 - MOMENTUM_SKIP - MOMENTUM_LOOKBACK + 1]
+
+            if pd.isna(current_price) or pd.isna(past_price) or past_price <= 0:
+                continue
+
+            momentum = (current_price / past_price) - 1
+
+            # 최근 6개월 변동성
+            daily_returns = close.pct_change().dropna()
+            recent_returns = daily_returns.iloc[-VOL_LOOKBACK:]
+
+            if len(recent_returns) < 60:
+                continue
+
+            volatility = recent_returns.std() * (252 ** 0.5)
 
             fund = fundamentals.get(ticker, {})
             pe = fund.get("pe", None)
             margin = fund.get("margin", None)
 
+            # Value
             if pe is None or pd.isna(pe) or pe <= 0:
                 continue
+            value = 1 / pe
 
+            # Quality
             if margin is None or pd.isna(margin):
                 continue
-
-            value = 1 / pe
             quality = margin
 
             results.append({
                 "Ticker": ticker,
-                "return": ret,
-                "volatility": vol,
+                "momentum": momentum,
+                "volatility": volatility,
                 "value": value,
                 "quality": quality
             })
@@ -61,12 +103,20 @@ def build_factor_frame(data, fundamentals, tickers, end_date=None):
     if df_result.empty:
         return df_result
 
-    df_result["return"] = pd.to_numeric(df_result["return"], errors="coerce")
-    df_result["volatility"] = pd.to_numeric(df_result["volatility"], errors="coerce")
-    df_result["value"] = pd.to_numeric(df_result["value"], errors="coerce")
-    df_result["quality"] = pd.to_numeric(df_result["quality"], errors="coerce")
+    for col in ["momentum", "volatility", "value", "quality"]:
+        df_result[col] = pd.to_numeric(df_result[col], errors="coerce")
 
     df_result = df_result.dropna().reset_index(drop=True)
+
+    if df_result.empty:
+        return df_result
+
+    # 극단값 완화
+    df_result["momentum"] = winsorize_series(df_result["momentum"])
+    df_result["volatility"] = winsorize_series(df_result["volatility"])
+    df_result["value"] = winsorize_series(df_result["value"])
+    df_result["quality"] = winsorize_series(df_result["quality"])
+
     return df_result
 
 
@@ -79,21 +129,63 @@ def calculate_scores(df, weights):
 
     df = df.copy()
 
-    df["momentum_z"] = safe_zscore(df["return"])
-    df["risk_z"] = safe_zscore(df["volatility"])
-    df["value_z"] = safe_zscore(df["value"])
-    df["quality_z"] = safe_zscore(df["quality"])
-
-    df["risk_z"] = -df["risk_z"]
+    # percentile rank 기반 점수
+    df["momentum_score"] = safe_rank_score(df["momentum"], ascending=True)
+    df["risk_score"] = safe_rank_score(df["volatility"], ascending=False)   # 낮을수록 좋음
+    df["value_score"] = safe_rank_score(df["value"], ascending=True)
+    df["quality_score"] = safe_rank_score(df["quality"], ascending=True)
 
     df["score"] = (
-        df["momentum_z"] * momentum_w +
-        df["risk_z"] * risk_w +
-        df["value_z"] * value_w +
-        df["quality_z"] * quality_w
+        df["momentum_score"] * momentum_w +
+        df["risk_score"] * risk_w +
+        df["value_score"] * value_w +
+        df["quality_score"] * quality_w
     )
 
     return df.sort_values("score", ascending=False).reset_index(drop=True)
+
+
+def select_portfolio_with_buffer(scored_df, prev_holdings, top_n=TOP_N, buffer_n=BUFFER_N):
+    ranked_df = scored_df.reset_index(drop=True).copy()
+    ranked_df["rank"] = range(1, len(ranked_df) + 1)
+
+    rank_map = dict(zip(ranked_df["Ticker"], ranked_df["rank"]))
+
+    kept = []
+    for ticker in prev_holdings:
+        rank = rank_map.get(ticker, None)
+        if rank is not None and rank <= buffer_n:
+            kept.append(ticker)
+
+    selected = kept.copy()
+
+    for ticker in ranked_df["Ticker"]:
+        if ticker in selected:
+            continue
+
+        rank = rank_map.get(ticker, None)
+        if rank is not None and rank <= top_n:
+            selected.append(ticker)
+
+        if len(selected) >= top_n:
+            break
+
+    if len(selected) < top_n:
+        for ticker in ranked_df["Ticker"]:
+            if ticker in selected:
+                continue
+            selected.append(ticker)
+            if len(selected) >= top_n:
+                break
+
+    selected = selected[:top_n]
+    portfolio_df = ranked_df[ranked_df["Ticker"].isin(selected)].copy()
+
+    # 원래 순위 순서 유지
+    portfolio_df["sort_rank"] = portfolio_df["Ticker"].map(rank_map)
+    portfolio_df = portfolio_df.sort_values("sort_rank").drop(columns=["sort_rank"])
+
+    return portfolio_df
 
 
 def backtest_strategy(data, fundamentals, tickers, weights):
@@ -111,7 +203,7 @@ def backtest_strategy(data, fundamentals, tickers, weights):
 
     monthly_dates = dates[::21]
 
-    prev_top = set()
+    prev_holdings = []
     turnovers = []
 
     for i in range(len(monthly_dates) - 1):
@@ -120,24 +212,24 @@ def backtest_strategy(data, fundamentals, tickers, weights):
 
         df_temp = build_factor_frame(data, fundamentals, tickers, end_date=start)
 
-        if df_temp.empty or len(df_temp) < 5:
+        if df_temp.empty or len(df_temp) < TOP_N:
             continue
 
-        df_temp = calculate_scores(df_temp, weights)
-        top = df_temp.head(10)
+        scored_df = calculate_scores(df_temp, weights)
+        top = select_portfolio_with_buffer(scored_df, prev_holdings, top_n=TOP_N, buffer_n=BUFFER_N)
 
-        current_top = set(top["Ticker"])
+        current_holdings = top["Ticker"].tolist()
 
-        if prev_top:
-            changed = len(current_top - prev_top)
-            turnover = changed / len(current_top) if len(current_top) > 0 else 0
+        if prev_holdings:
+            changed = len(set(current_holdings) - set(prev_holdings))
+            turnover = changed / len(current_holdings) if len(current_holdings) > 0 else 0
             turnovers.append(turnover)
 
-        prev_top = current_top
+        prev_holdings = current_holdings
 
         period_returns = []
 
-        for ticker in top["Ticker"]:
+        for ticker in current_holdings:
             df = data.get(ticker, None)
             if df is None or df.empty:
                 continue
