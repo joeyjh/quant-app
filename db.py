@@ -35,6 +35,21 @@ def init_db():
     )
     """)
 
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS mock_portfolios (
+        snapshot_id TEXT,
+        snapshot_date TEXT,
+        preset_name TEXT,
+        momentum_weight REAL,
+        risk_weight REAL,
+        value_weight REAL,
+        quality_weight REAL,
+        ticker TEXT,
+        weight REAL,
+        PRIMARY KEY (snapshot_id, ticker)
+    )
+    """)
+
     conn.commit()
     conn.close()
 
@@ -154,3 +169,110 @@ def load_fundamentals_from_db(tickers):
         }
 
     return result
+
+
+def save_mock_portfolio(snapshot_id, snapshot_date, preset_name, weights, tickers, weight_per_stock):
+    conn = get_connection()
+    cur = conn.cursor()
+
+    momentum_w, risk_w, value_w, quality_w = weights
+
+    records = []
+    for ticker in tickers:
+        records.append((
+            snapshot_id,
+            snapshot_date,
+            preset_name,
+            momentum_w,
+            risk_w,
+            value_w,
+            quality_w,
+            ticker,
+            weight_per_stock
+        ))
+
+    cur.executemany("""
+    INSERT OR REPLACE INTO mock_portfolios
+    (
+        snapshot_id,
+        snapshot_date,
+        preset_name,
+        momentum_weight,
+        risk_weight,
+        value_weight,
+        quality_weight,
+        ticker,
+        weight
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, records)
+
+    conn.commit()
+    conn.close()
+
+
+def list_mock_portfolio_snapshots():
+    conn = get_connection()
+
+    query = """
+    SELECT
+        snapshot_id,
+        snapshot_date,
+        preset_name,
+        momentum_weight,
+        risk_weight,
+        value_weight,
+        quality_weight,
+        COUNT(*) as stock_count
+    FROM mock_portfolios
+    GROUP BY
+        snapshot_id,
+        snapshot_date,
+        preset_name,
+        momentum_weight,
+        risk_weight,
+        value_weight,
+        quality_weight
+    ORDER BY snapshot_date DESC, snapshot_id DESC
+    """
+
+    df = pd.read_sql(query, conn)
+    conn.close()
+    return df
+
+
+def load_mock_portfolio(snapshot_id):
+    conn = get_connection()
+
+    query = """
+    SELECT
+        snapshot_id,
+        snapshot_date,
+        preset_name,
+        momentum_weight,
+        risk_weight,
+        value_weight,
+        quality_weight,
+        ticker,
+        weight
+    FROM mock_portfolios
+    WHERE snapshot_id = ?
+    ORDER BY ticker
+    """
+
+    df = pd.read_sql(query, conn, params=(snapshot_id,))
+    conn.close()
+    return df
+
+
+def delete_mock_portfolio(snapshot_id):
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+    DELETE FROM mock_portfolios
+    WHERE snapshot_id = ?
+    """, (snapshot_id,))
+
+    conn.commit()
+    conn.close()

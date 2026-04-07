@@ -94,7 +94,7 @@ def load_model_data():
 init_session_state()
 page = render_top_navigation()
 
-needs_model_data = page in ["홈", "백테스트", "가격차트"]
+needs_model_data = page in ["홈", "백테스트", "가격차트", "모의투자"]
 
 if needs_model_data:
     tickers, data, fundamentals, scored_df, weights = load_model_data()
@@ -105,9 +105,9 @@ if needs_model_data:
         render_backtest_page(data, fundamentals, tickers, weights, backtest_strategy)
     elif page == "가격차트":
         render_price_chart_page(fundamentals, scored_df, get_chart)
+    elif page == "모의투자":
+        render_mock_page(fundamentals, scored_df, weights)
 elif page == "전략":
     render_strategy_page()
-elif page == "모의투자":
-    render_mock_page()
 elif page == "설정":
     render_settings_page()

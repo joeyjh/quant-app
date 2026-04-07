@@ -12,6 +12,90 @@ from state_utils import (
 )
 from ui_utils import enrich_table, format_ticker_list, metric_text, parse_holdings
 
+def render_stock_card(row, fundamentals):
+    ticker = row["Ticker"]
+    company = fundamentals.get(ticker, {}).get("name", ticker)
+
+    momentum = row["momentum"]
+    risk = row["volatility"]
+    value = row["value"]
+    quality = row["quality"]
+    total_score = row["score"]
+
+    # 점수 뱃지용 간단 등급
+    if total_score >= 0.80:
+        badge_label = "Top"
+    elif total_score >= 0.65:
+        badge_label = "High"
+    else:
+        badge_label = "Good"
+
+    with st.container(border=True):
+        left, mid, right = st.columns([6, 2, 1])
+
+        with left:
+            st.markdown(f"**{company}**")
+            st.caption(ticker)
+
+        with mid:
+            st.markdown(
+                f"""
+                <div style="
+                    display:inline-block;
+                    padding:6px 10px;
+                    border-radius:999px;
+                    background:rgba(255,255,255,0.08);
+                    border:1px solid rgba(255,255,255,0.12);
+                    font-size:12px;
+                    font-weight:600;
+                    text-align:center;
+                    min-width:76px;
+                ">
+                    {badge_label} · {total_score:.3f}
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+        with right:
+            st.markdown(
+                f"""
+                <div style="
+                    width:36px;
+                    height:36px;
+                    border-radius:50%;
+                    display:flex;
+                    align-items:center;
+                    justify-content:center;
+                    background:rgba(255,255,255,0.08);
+                    border:1px solid rgba(255,255,255,0.12);
+                    font-weight:700;
+                    font-size:14px;
+                    margin-left:auto;
+                ">
+                    {ticker[0]}
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+        with st.expander("점수 보기", expanded=False):
+            c1, c2 = st.columns(2)
+            with c1:
+                st.write(f"**Momentum**: {momentum:.4f}")
+                st.write(f"**Value**: {value:.4f}")
+            with c2:
+                st.write(f"**Risk**: {risk:.4f}")
+                st.write(f"**Quality**: {quality:.4f}")
+
+            st.write(f"**Total Score:** {total_score:.3f}")
+
+def render_stock_cards(df, fundamentals, limit=10):
+    subset = df.head(limit).copy()
+
+    for _, row in subset.iterrows():
+        render_stock_card(row, fundamentals)
+
 
 def render_home_page(fundamentals, scored_df):
     st.markdown("## 홈")
@@ -147,18 +231,15 @@ def render_home_page(fundamentals, scored_df):
                 st.write(f"- {item}")
 
     st.markdown(f"#### {result_title}")
+    st.caption("아래 카드는 현재 적용된 전략 기준 추천 후보입니다.")
 
-    main_table = enrich_table(portfolio_df, fundamentals)
-    st.dataframe(
-        main_table[
-            ["Company", "Momentum (12-1M)", "Risk (Vol)", "Value Score", "Quality Score", "Total Score"]
-        ],
-        use_container_width=True,
-        hide_index=True
-    )
+    render_stock_cards(portfolio_df, fundamentals, limit=10)
 
     st.markdown("### 더보기")
     with st.expander("추가 후보 20개 보기", expanded=False):
+        render_stock_cards(scored_df.head(30).iloc[10:], fundamentals, limit=20)
+
+        st.markdown("#### 표로 보기")
         extended_df = scored_df.head(30).copy()
         extended_table = enrich_table(extended_df, fundamentals)
 
