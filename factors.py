@@ -190,6 +190,7 @@ def select_portfolio_with_buffer(scored_df, prev_holdings, top_n=TOP_N, buffer_n
 
 def backtest_strategy(data, fundamentals, tickers, weights):
     portfolio_returns = []
+    portfolio_dates = []
 
     dates = None
     for ticker in tickers:
@@ -250,8 +251,10 @@ def backtest_strategy(data, fundamentals, tickers, weights):
             continue
 
         portfolio_returns.append(sum(period_returns) / len(period_returns))
+        portfolio_dates.append(end)
 
     if len(portfolio_returns) == 0:
         return None, turnovers
 
-    return pd.Series(portfolio_returns).cumsum(), turnovers
+    bt_series = pd.Series(portfolio_returns, index=pd.to_datetime(portfolio_dates)).sort_index().cumsum()
+    return bt_series, turnovers
