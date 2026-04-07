@@ -2,15 +2,22 @@ import streamlit as st
 
 from config import TOP_N
 from factors import select_portfolio_with_buffer
-from state_utils import PRESETS, apply_preset_if_changed, get_normalized_weights
+from state_utils import (
+    PRESETS,
+    apply_current_strategy,
+    apply_preset_if_changed,
+    get_draft_normalized_weights,
+    get_normalized_weights,
+    is_strategy_dirty,
+)
 from ui_utils import enrich_table, format_ticker_list, metric_text, parse_holdings
 
 
 def render_home_page(fundamentals, scored_df):
     st.markdown("## 홈")
-    st.caption("먼저 투자 스타일을 고르고, 필요하면 보유 종목을 입력한 뒤 추천 결과를 확인합니다.")
+    st.caption("먼저 투자 스타일을 고르고, 전략을 고정한 뒤 추천 결과를 확인합니다.")
 
-    st.markdown("### 1) Preset 선택")
+    st.markdown("### 1) 전략 선택")
 
     selected_preset = st.radio(
         "투자 스타일",
@@ -22,7 +29,7 @@ def render_home_page(fundamentals, scored_df):
     apply_preset_if_changed()
 
     preset = PRESETS[selected_preset]
-    st.info(f"**{selected_preset}** — {preset['description']}")
+    st.info(f"선택 중인 전략: **{selected_preset}** — {preset['description']}")
 
     is_manual = selected_preset == "직접 설정"
 
@@ -38,13 +45,36 @@ def render_home_page(fundamentals, scored_df):
             st.slider("Value", 0.0, 1.0, float(st.session_state["value_weight"]), key="value_weight")
             st.slider("Quality", 0.0, 1.0, float(st.session_state["quality_weight"]), key="quality_weight")
 
-    weights = get_normalized_weights()
+    draft_weights = get_draft_normalized_weights()
+    applied_weights = get_normalized_weights()
 
+    st.markdown("#### 현재 선택 중인 비중")
     w1, w2, w3, w4 = st.columns(4)
-    w1.metric("Momentum", metric_text(weights[0], "percent", 0))
-    w2.metric("Risk", metric_text(weights[1], "percent", 0))
-    w3.metric("Value", metric_text(weights[2], "percent", 0))
-    w4.metric("Quality", metric_text(weights[3], "percent", 0))
+    w1.metric("Momentum", metric_text(draft_weights[0], "percent", 0))
+    w2.metric("Risk", metric_text(draft_weights[1], "percent", 0))
+    w3.metric("Value", metric_text(draft_weights[2], "percent", 0))
+    w4.metric("Quality", metric_text(draft_weights[3], "percent", 0))
+
+    dirty = is_strategy_dirty()
+
+    c1, c2 = st.columns([1, 2])
+    with c1:
+        if st.button("현재 전략으로 고정", use_container_width=True, type="primary"):
+            apply_current_strategy()
+            st.rerun()
+    with c2:
+        if dirty:
+            st.warning("현재 선택 중인 전략이 아직 적용되지 않았습니다. 버튼을 눌러야 추천 결과와 백테스트에 반영됩니다.")
+        else:
+            st.success("현재 선택 중인 전략이 이미 앱에 적용되어 있습니다.")
+
+    st.markdown("#### 현재 앱에 적용된 전략")
+    st.write(f"**{st.session_state['applied_preset']}**")
+    a1, a2, a3, a4 = st.columns(4)
+    a1.metric("Momentum", metric_text(applied_weights[0], "percent", 0))
+    a2.metric("Risk", metric_text(applied_weights[1], "percent", 0))
+    a3.metric("Value", metric_text(applied_weights[2], "percent", 0))
+    a4.metric("Quality", metric_text(applied_weights[3], "percent", 0))
 
     st.markdown("---")
     st.markdown("### 2) 지난달 보유 종목 확인")
@@ -94,9 +124,9 @@ def render_home_page(fundamentals, scored_df):
 
     target_weight = 1 / TOP_N if TOP_N > 0 else 0
 
-    a1, a2 = st.columns(2)
-    a1.metric("추천 종목 수", f"{len(final_holdings)}개")
-    a2.metric("종목당 목표 비중", metric_text(target_weight, "percent", 0))
+    r1, r2 = st.columns(2)
+    r1.metric("추천 종목 수", f"{len(final_holdings)}개")
+    r2.metric("종목당 목표 비중", metric_text(target_weight, "percent", 0))
 
     if has_previous == "있음" and valid_previous_holdings:
         c1, c2, c3 = st.columns(3)

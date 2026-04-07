@@ -10,9 +10,9 @@ from ui_utils import apply_period_filter, metric_text
 
 def render_backtest_page(data, fundamentals, tickers, weights, backtest_strategy):
     st.markdown("## 백테스트")
-    st.caption("현재 선택한 preset 기준으로, 월 1회 리밸런싱했을 때의 누적 수익률 변화를 확인합니다.")
+    st.caption("현재 앱에 적용된 전략 기준으로, 월 1회 리밸런싱했을 때의 누적 수익률 변화를 확인합니다.")
 
-    selected_preset = st.session_state.get("selected_preset", "기본 추천")
+    selected_preset = st.session_state.get("applied_preset", "기본 추천")
     momentum_w, risk_w, value_w, quality_w = weights
 
     st.info(
